@@ -1,0 +1,62 @@
+{
+  "name": "multiplex",
+  "version": "0.1.1",
+  "displayName": "Multiplex",
+  "description": "See what your agents are working on, what needs you, and what comes next—all in one KiroCrew overview. Follow recorded progress across sessions, models, and providers without opening every conversation to piece the work together.",
+  "author": "Multiplex contributors",
+  "license": "MIT",
+  "minKiroCrewVersion": "0.8.0",
+  "tags": ["agents", "orchestration", "collaboration", "visualization"],
+  "highlights": [
+    "Bring sessions across agents, models, and providers into one view.",
+    "See active work, idle sessions, and requests for your attention.",
+    "Capture concise goals, updates, evidence, and next actions on each session.",
+    "Use list, cards, or compact grid views for the same operational state."
+  ],
+  "useCases": [
+    "When work spans several sessions, models, or providers, scan their recorded goals and updates in one place to see who is doing what without opening every conversation.",
+    "When agents work together, compare their recorded updates and next actions side by side to follow handoffs and see where your input is needed.",
+    "When a session needs attention, read its recorded request in the overview and open the conversation to make the decision with context.",
+    "Before stepping away, save the current work and next action on a session card so you can pick up where you left off without searching the chat history.",
+    "When a native session needs follow-up, keep it visible in Multiplex and use its resume details when you are ready to continue."
+  ],
+  "configuration": [
+    "Install and enable Multiplex from a trusted local checkout or registry.",
+    "Optionally install lifecycle hooks for supported native clients.",
+    "Use the card editor only for concise corrections, handoffs, or exceptional notes."
+  ],
+  "iconPath": "assets/multiplex-icon.png",
+  "heroImage": "assets/multiplex-hero.png",
+  "heroImageDark": "assets/multiplex-hero.png",
+  "screenshots": ["assets/multiplex-cards-demo.png"],
+  "defaultEnabled": false,
+  "permissions": {
+    "api": [
+      "/api/chat/slots",
+      "/api/chat/slots/*",
+      "/api/apps/multiplex",
+      "/api/apps/multiplex/*"
+    ],
+    "events": ["slots"],
+    "storage": true
+  },
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [
+      {
+        "route": "/apps/multiplex",
+        "label": "Multiplex",
+        "iconUrl": "icon.svg"
+      }
+    ],
+    "sidebar": {
+      "section": "Apps",
+      "order": 20
+    }
+  },
+  "backend": {
+    "hooks": {
+      "routes": "backend.routes:register_routes"
+    }
+  }
+}
