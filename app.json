@@ -1,0 +1,60 @@
+{
+  "name": "multiplex",
+  "version": "0.1.0",
+  "displayName": "Multiplex",
+  "description": "Coordinate work across agents, models, and providers in one KiroCrew overview. Follow goals, progress, updates, and next actions, then open the conversation to continue.",
+  "author": "Multiplex contributors",
+  "license": "MIT",
+  "minKiroCrewVersion": "0.8.0",
+  "tags": ["agents", "orchestration", "collaboration", "visualization"],
+  "highlights": [
+    "Bring sessions across agents, models, and providers into one view.",
+    "See active work, idle sessions, and requests for your attention.",
+    "Capture concise goals, updates, evidence, and next actions on each session.",
+    "Use list, cards, or compact grid views for the same operational state."
+  ],
+  "useCases": [
+    "Coordinate a mixed team of agents using different models and providers.",
+    "Pick up a session from its recorded goal, updates, and next action.",
+    "Keep native sessions visible for later review and resumption."
+  ],
+  "configuration": [
+    "Install and enable Multiplex from a trusted local checkout or registry.",
+    "Optionally install lifecycle hooks for supported native clients.",
+    "Use the card editor only for concise corrections, handoffs, or exceptional notes."
+  ],
+  "iconPath": "assets/multiplex-icon.png",
+  "heroImage": "assets/multiplex-hero.png",
+  "heroImageDark": "assets/multiplex-hero.png",
+  "screenshots": ["assets/multiplex-cards-demo.png"],
+  "defaultEnabled": false,
+  "permissions": {
+    "api": [
+      "/api/chat/slots",
+      "/api/chat/slots/*",
+      "/api/apps/multiplex",
+      "/api/apps/multiplex/*"
+    ],
+    "events": ["slots"],
+    "storage": true
+  },
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [
+      {
+        "route": "/apps/multiplex",
+        "label": "Multiplex",
+        "iconUrl": "icon.svg"
+      }
+    ],
+    "sidebar": {
+      "section": "Apps",
+      "order": 20
+    }
+  },
+  "backend": {
+    "hooks": {
+      "routes": "backend.routes:register_routes"
+    }
+  }
+}
