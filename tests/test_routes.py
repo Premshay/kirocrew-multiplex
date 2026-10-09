@@ -618,6 +618,12 @@ async def test_workflow_projection_requires_authentication_and_whitelists_compac
                     "result": {"secret": "must not project"},
                     "last_log": "must not project",
                 },
+                {
+                    "run_id": "wf_000005",
+                    "status": "cancelled",
+                    "ended_at": "2026-10-08T12:00:00Z",
+                },
+                {"run_id": "wf_000006", "status": "failed", "ended_at": 1728388800},
                 {"run_id": "bad id", "status": "finished"},
                 {"run_id": "wf_000004", "status": "unknown"},
             ]
@@ -637,7 +643,26 @@ async def test_workflow_projection_requires_authentication_and_whitelists_compac
                 "phase": "Verify",
                 "event_count": 9,
                 "agent_error_count": 0,
-            }
+                "ended_at": None,
+            },
+            {
+                "run_id": "wf_000005",
+                "name": "",
+                "status": "cancelled",
+                "phase": "",
+                "event_count": 0,
+                "agent_error_count": 0,
+                "ended_at": "2026-10-08T12:00:00Z",
+            },
+            {
+                "run_id": "wf_000006",
+                "name": "",
+                "status": "failed",
+                "phase": "",
+                "event_count": 0,
+                "agent_error_count": 0,
+                "ended_at": None,
+            },
         ],
     }
 

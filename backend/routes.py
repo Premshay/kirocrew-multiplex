@@ -1177,6 +1177,11 @@ def _workflow_run_view(raw: Any) -> dict[str, Any] | None:
         phase = _optional_text(raw.get("phase"), "workflow.phase", 160)
     except ValueError:
         return None
+    # Terminal-event time: null while active and absent on older gateways. A
+    # malformed value drops only the age, never the run.
+    ended_at = raw.get("ended_at")
+    if not isinstance(ended_at, str) or len(ended_at) > 64:
+        ended_at = ""
     event_count = raw.get("event_count", 0)
     agent_error_count = raw.get("agent_error_count", 0)
     if (
@@ -1195,6 +1200,7 @@ def _workflow_run_view(raw: Any) -> dict[str, Any] | None:
         "phase": phase,
         "event_count": event_count,
         "agent_error_count": agent_error_count,
+        "ended_at": ended_at.strip() or None,
     }
 
 

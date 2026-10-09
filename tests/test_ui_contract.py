@@ -285,6 +285,7 @@ def test_card_data_uses_structured_timeline_and_never_last_message() -> None:
         "workflow_phase": "Verify",
         "workflow_event_count": 9,
         "workflow_agent_error_count": 0,
+        "workflow_ended_at": "",
         "agent": "Workflow",
         "title": "multiplex-first-run-v3",
         "running": False,
@@ -374,3 +375,94 @@ def test_session_card_titles_wrap_instead_of_truncating() -> None:
     assert "overflowWrap: 'anywhere'" in title_style
     assert "textOverflow" not in title_style
     assert "whiteSpace" not in title_style
+
+
+def _older_record_cases() -> list[bool]:
+    helpers = (
+        UI_PATH.read_text()
+        .split("function Multiplex()", maxsplit=1)[0]
+        .replace("const React = window.__kirocrew_modules.react", "const React = {}")
+        .replace(
+            "const { useAppApi, useAppEvents, useNavigate } = window.__kirocrew_modules['@kirocrew/app-sdk']",
+            "const useAppApi = null; const useAppEvents = null; const useNavigate = null",
+        )
+        .replace(
+            "const { ArrowUpRight, CircleAlert, CircleCheck, CirclePause, RefreshCw } = window.__kirocrew_modules['lucide-react']",
+            "const ArrowUpRight = null; const CircleAlert = null; const CircleCheck = null; const CirclePause = null; const RefreshCw = null",
+        )
+        .replace(
+            "const { createElement: h, useCallback, useEffect, useState } = React",
+            "const h = null; const useCallback = null; const useEffect = null; const useState = null",
+        )
+    )
+    script = helpers + """
+const now = Date.parse('2026-10-09T12:00:00Z')
+const old = '2026-10-07T12:00:00Z'
+const recent = '2026-10-09T06:00:00Z'
+const past = { catalog: 'unknown', execution: 'unknown' }
+const workflow = (status, ended_at) => {
+  const slot = workflowSlot({ run_id: 'wf_1', status, ended_at })
+  return { slot, checkpoint: null, presence: fallbackPresence(slot) }
+}
+const saved = checkpoint => ({ slot: { key: 'saved', checkpointOnly: true }, checkpoint, presence: past })
+const cases = [
+  workflow('finished', old),
+  workflow('failed', old),
+  workflow('cancelled', old),
+  workflow('finished', recent),
+  workflow('finished', undefined),
+  workflow('running', old),
+  saved({ state: 'active', updated_at: old }),
+  saved({ state: 'unattended', updated_at: recent }),
+  saved({ state: 'unattended' }),
+  saved({ state: 'unattended', updated_at: old, attention: { status: 'unassigned' } }),
+  saved({ state: 'unattended', updated_at: old, attention: { status: 'claimed' } }),
+  saved({ state: 'awaiting_attention', updated_at: old }),
+  { slot: { key: 'native', native: true, last_activity_at: old }, checkpoint: null, presence: { catalog: 'observed', execution: 'unknown' } },
+  { slot: { key: 'native', native: true, last_activity_at: recent }, checkpoint: { updated_at: old }, presence: { catalog: 'observed', execution: 'unknown' } },
+  { slot: { key: 'native', native: true, last_activity_at: old }, checkpoint: null, presence: { catalog: 'tracked', execution: 'unknown' } },
+  { slot: { key: 'native', native: true, last_activity_at: old }, checkpoint: null, presence: { catalog: 'observed', execution: 'active' } },
+  { slot: { key: 'idle-chat', running: false }, checkpoint: { updated_at: old }, presence: { catalog: 'open', execution: 'idle' } },
+  { slot: { key: 'approval', pending_approval: true, last_activity_at: old }, checkpoint: null, presence: past },
+]
+process.stdout.write(JSON.stringify(cases.map(row => isOlderRecord(row, now))))
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_only_finished_records_past_the_window_age_out() -> None:
+    assert _older_record_cases() == [
+        True,   # finished workflow, ended two days ago
+        True,   # failed workflow
+        True,   # cancelled workflow
+        False,  # finished within the window
+        False,  # gateway without ended_at: age unknown, stays visible
+        False,  # running workflow never ages
+        True,   # orphaned checkpoint claiming "active" has no live evidence
+        False,  # recent orphaned checkpoint
+        False,  # orphaned checkpoint with no timestamp
+        False,  # unassigned attention
+        False,  # claimed attention is owned, unfinished work
+        False,  # awaiting attention
+        True,   # observed native transcript, old
+        False,  # newest evidence wins over an older checkpoint
+        False,  # explicitly tracked
+        False,  # provider reports active execution
+        False,  # open dashboard slot, however idle
+        False,  # pending approval
+    ]
+
+
+def test_older_records_leave_default_counts_behind_a_visible_control() -> None:
+    source = UI_PATH.read_text()
+    assert "const OLDER_AFTER_MS = 24 * 60 * 60 * 1000" in source
+    assert "`Show older (${olderRows.length})`" in source
+    assert "`Show history (${historyRows.length})`" in source
+    assert "row => !olderRows.includes(row)" in source
+    assert "...(showOlder ? [['Older', olderRows]] : [])" in source

@@ -4,6 +4,8 @@ const { ArrowUpRight, CircleAlert, CircleCheck, CirclePause, RefreshCw } = windo
 const { createElement: h, useCallback, useEffect, useState } = React
 
 const APP_API = '/api/apps/multiplex'
+// A finished record older than this leaves the default view and counts; "Show older" reveals it.
+const OLDER_AFTER_MS = 24 * 60 * 60 * 1000
 const styles = {
   root: { boxSizing: 'border-box', minHeight: 0, width: '100%', padding: '24px clamp(20px, 3vw, 52px) 48px', overflowY: 'auto', color: 'var(--text)' },
   header: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '18px', marginBottom: '24px' },
@@ -118,6 +120,25 @@ function displayState(checkpoint, slot, presence = null) {
   if (checkpoint?.state) return checkpoint.state.replaceAll('_', ' ')
   if (slot?.stopping) return 'paused'
   return slot?.running ? 'active' : 'unattended'
+}
+
+function needsAttention(checkpoint, slot) {
+  return checkpoint?.attention?.status === 'unassigned' || Boolean(slot?.pending_approval) || peerChannelAttention(slot).length > 0
+}
+
+function lastEvidenceMs(slot, checkpoint) {
+  if (slot?.workflow) return timestampMs(slot.workflow_ended_at)
+  return Math.max(timestampMs(slot?.last_activity_at), timestampMs(checkpoint?.recorded_at), timestampMs(checkpoint?.updated_at))
+}
+
+// Only a historical record ages out. Open, tracked, executing, running, waiting or
+// owned-attention cards never do, and a record with no timestamp stays visible.
+function isOlderRecord({ slot, checkpoint, presence }, nowMs) {
+  if (['open', 'tracked'].includes(presence?.catalog) || presence?.execution === 'active') return false
+  if (slot?.workflow && slot.workflow_status === 'running') return false
+  if (needsAttention(checkpoint, slot) || checkpoint?.attention?.status === 'claimed' || checkpoint?.state === 'awaiting_attention') return false
+  const evidenceMs = lastEvidenceMs(slot, checkpoint)
+  return evidenceMs > 0 && nowMs - evidenceMs > OLDER_AFTER_MS
 }
 
 function attentionText(checkpoint, slot) {
@@ -545,6 +566,7 @@ function workflowSlot(run) {
     workflow_phase: phase,
     workflow_event_count: eventCount,
     workflow_agent_error_count: agentErrorCount,
+    workflow_ended_at: textValue(run.ended_at),
     agent: 'Workflow',
     title: name,
     running: status === 'running',
@@ -576,6 +598,7 @@ function Multiplex() {
   const [injectedHandoffs, setInjectedHandoffs] = useState(() => new Set())
   const [presenceBySession, setPresenceBySession] = useState({})
   const [showHistory, setShowHistory] = useState(false)
+  const [showOlder, setShowOlder] = useState(false)
   const [workspaceFilter, setWorkspaceFilter] = useState('')
   const [viewMode, setViewMode] = useState('list')
 
@@ -724,13 +747,17 @@ function Multiplex() {
   const workingRows = filteredRows.filter(({ presence }) => presence.execution === 'active')
   const openRows = filteredRows.filter(({ presence }) => presence.catalog === 'open' && presence.execution !== 'active')
   const trackedRows = filteredRows.filter(({ presence }) => presence.catalog === 'tracked' && presence.execution !== 'active')
-  const historyRows = filteredRows.filter(({ presence }) => !['open', 'tracked'].includes(presence.catalog) && presence.execution !== 'active')
+  const nowMs = Date.now()
+  const pastRows = filteredRows.filter(({ presence }) => !['open', 'tracked'].includes(presence.catalog) && presence.execution !== 'active')
+  const olderRows = pastRows.filter(row => isOlderRecord(row, nowMs))
+  const historyRows = pastRows.filter(row => !olderRows.includes(row))
   const attentionRows = filteredRows.filter(({ slot, checkpoint }) => checkpoint?.attention?.status === 'unassigned' || slot.pending_approval || peerChannelAttention(slot).length > 0)
   const groups = [
     ['Working now', workingRows],
     ['Open sessions', openRows],
     ['Tracked provider sessions', trackedRows],
     ...(showHistory ? [['History', historyRows]] : []),
+    ...(showOlder ? [['Older', olderRows]] : []),
   ].filter(([, groupRows]) => groupRows.length > 0)
   const sharedPathsBySession = liveChangedPathOverlaps(changedPathOverlaps, workingRows)
   const overview = [
@@ -774,8 +801,8 @@ function Multiplex() {
       const runtime = runtimeBySession[slot.key]
       const card = cardData(slot, checkpoint, runtime, presence)
       const { state, title, role, line } = card
-      const needsAttention = checkpoint?.attention?.status === 'unassigned' || slot.pending_approval || peerChannelAttention(slot).length > 0
-      const attentionStyle = needsAttention ? { color: '#b45309', fontWeight: 600 } : {}
+      const attentionNeeded = needsAttention(checkpoint, slot)
+      const attentionStyle = attentionNeeded ? { color: '#b45309', fontWeight: 600 } : {}
       const runtimeItems = [
         ...runtimeLabels(runtime),
         ...(checkpointOverdue(slot) ? ['Checkpoint needs update'] : []),
@@ -920,7 +947,7 @@ function Multiplex() {
           ),
         ),
         h('footer', { style: styles.footer },
-          h('span', { style: { ...styles.footerItem, ...attentionStyle } }, needsAttention ? h(CircleAlert, { size: 12 }) : h(CircleCheck, { size: 12 }), attentionText(checkpoint, slot)),
+          h('span', { style: { ...styles.footerItem, ...attentionStyle } }, attentionNeeded ? h(CircleAlert, { size: 12 }) : h(CircleCheck, { size: 12 }), attentionText(checkpoint, slot)),
           peerDeliveryText(slot) && h('span', { style: styles.footerItem }, peerDeliveryText(slot)),
           !(runtime?.agents_active && card.liveStatus === 'The session is active.') && h('span', { style: styles.footerItem }, card.liveStatus),
           h('span', { style: styles.footerItem }, sessionLocation(presence)),
@@ -930,8 +957,9 @@ function Multiplex() {
     })),
       ),
     )),
-    !loading && historyRows.length > 0 && h('div', { style: { display: 'flex', justifyContent: 'center', margin: '4px 0 16px' } },
-      h('button', { style: styles.ghostButton, onClick: () => setShowHistory(previous => !previous) }, showHistory ? `Hide history (${historyRows.length})` : `Show history (${historyRows.length})`),
+    !loading && (historyRows.length > 0 || olderRows.length > 0) && h('div', { style: { display: 'flex', justifyContent: 'center', gap: '8px', margin: '4px 0 16px' } },
+      historyRows.length > 0 && h('button', { style: styles.ghostButton, onClick: () => setShowHistory(previous => !previous) }, showHistory ? `Hide history (${historyRows.length})` : `Show history (${historyRows.length})`),
+      olderRows.length > 0 && h('button', { style: styles.ghostButton, onClick: () => setShowOlder(previous => !previous) }, showOlder ? `Hide older (${olderRows.length})` : `Show older (${olderRows.length})`),
     ),
   )
 }
