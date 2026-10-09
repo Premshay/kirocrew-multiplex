@@ -449,7 +449,7 @@ def test_only_finished_records_past_the_window_age_out() -> None:
         False,  # orphaned checkpoint with no timestamp
         False,  # unassigned attention
         False,  # claimed attention is owned, unfinished work
-        False,  # awaiting attention
+        True,   # stored awaiting_attention with nothing live behind it
         True,   # observed native transcript, old
         False,  # newest evidence wins over an older checkpoint
         False,  # explicitly tracked
@@ -466,3 +466,69 @@ def test_older_records_leave_default_counts_behind_a_visible_control() -> None:
     assert "`Show history (${historyRows.length})`" in source
     assert "row => !olderRows.includes(row)" in source
     assert "...(showOlder ? [['Older', olderRows]] : [])" in source
+
+
+def _display_state_cases() -> list[object]:
+    helpers = (
+        UI_PATH.read_text()
+        .split("function Multiplex()", maxsplit=1)[0]
+        .replace("const React = window.__kirocrew_modules.react", "const React = {}")
+        .replace(
+            "const { useAppApi, useAppEvents, useNavigate } = window.__kirocrew_modules['@kirocrew/app-sdk']",
+            "const useAppApi = null; const useAppEvents = null; const useNavigate = null",
+        )
+        .replace(
+            "const { ArrowUpRight, CircleAlert, CircleCheck, CirclePause, RefreshCw } = window.__kirocrew_modules['lucide-react']",
+            "const ArrowUpRight = null; const CircleAlert = null; const CircleCheck = null; const CirclePause = null; const RefreshCw = null",
+        )
+        .replace(
+            "const { createElement: h, useCallback, useEffect, useState } = React",
+            "const h = null; const useCallback = null; const useEffect = null; const useState = null",
+        )
+    )
+    script = helpers + """
+const orphan = { key: 'native:claude:abc', checkpointOnly: true, running: false }
+const stored = state => ({ state, updated_at: '2026-08-11T12:00:00Z' })
+const peer = { peer_channel_attention: [{ channel_id: 'deadbeef', from_role: 'Verifier' }] }
+const none = { catalog: 'unknown', execution: 'unknown' }
+process.stdout.write(JSON.stringify([
+  displayState(stored('active'), orphan, none),
+  displayState(stored('awaiting_attention'), orphan, none),
+  displayState(stored('active'), { key: 'native:claude:abc', native: true }, { catalog: 'observed', execution: 'unknown' }),
+  displayState(stored('active'), orphan, { catalog: 'open', execution: 'idle' }),
+  displayState(stored('active'), orphan, { catalog: 'tracked', execution: 'unknown' }),
+  displayState(stored('active'), orphan, { catalog: 'unknown', execution: 'active' }),
+  displayState(stored('awaiting_attention'), { ...orphan, pending_approval: { tool: 'git' } }, none),
+  displayState(stored('awaiting_attention'), { ...orphan, ...peer }, none),
+  displayState(stored('unattended'), orphan, none),
+  footerTimestamp(orphan, stored('active'), true),
+  footerTimestamp(orphan, stored('active'), false),
+]))
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_stored_live_state_needs_something_live_behind_it() -> None:
+    assert _display_state_cases()[:9] == [
+        "ended",  # stored active, nothing live
+        "ended",  # stored awaiting_attention, nothing live
+        "observed",  # transcript evidence is labelled observed, never active
+        "idle",  # open catalog backs it
+        "tracked",  # tracked catalog backs it
+        "active",  # execution active backs it
+        "awaiting attention",  # pending approval backs it
+        "awaiting attention",  # peer request backs it
+        "unattended",  # non-live stored state is unchanged
+    ]
+
+
+def test_ended_cards_show_last_seen_time() -> None:
+    cases = _display_state_cases()
+    assert cases[9].startswith("Last seen ")
+    assert "Last seen" not in cases[10]

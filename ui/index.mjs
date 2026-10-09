@@ -86,8 +86,10 @@ function peerDeliveryText(slot) {
   return `${count} peer ${count === 1 ? 'delivery' : 'deliveries'} received`
 }
 
-function footerTimestamp(slot, checkpoint) {
+function footerTimestamp(slot, checkpoint, ended = false) {
   const labels = []
+  const lastSeenMs = ended ? lastEvidenceMs(slot, checkpoint) : 0
+  if (lastSeenMs > 0) labels.push(`Last seen ${new Date(lastSeenMs).toLocaleString()}`)
   if (slot?.native && slot.last_activity_at) {
     labels.push(`Observed ${new Date(slot.last_activity_at).toLocaleString()}`)
   }
@@ -96,6 +98,16 @@ function footerTimestamp(slot, checkpoint) {
   if (labels.length) return labels.join(' · ')
   if (slot?.workflow) return `Workflow ${slot.workflow_run_id}`
   return slot?.native ? '' : 'Live projection'
+}
+
+// A stored 'active' or 'awaiting_attention' is a claim made when the record was last
+// written. displayState has already returned for every live backing (open or tracked
+// catalog, active execution, pending approval, peer request), so reaching a stored
+// live state means nothing backs it. The stored record is never edited for this.
+const LIVE_STORED_STATES = ['active', 'awaiting_attention']
+
+function isUnbackedLiveState(checkpoint) {
+  return LIVE_STORED_STATES.includes(checkpoint?.state)
 }
 
 function displayState(checkpoint, slot, presence = null) {
@@ -113,6 +125,7 @@ function displayState(checkpoint, slot, presence = null) {
   if (presence?.catalog === 'open') return 'open'
   if (presence?.catalog === 'tracked') return 'tracked'
   if (presence?.catalog === 'observed') return 'observed'
+  if (isUnbackedLiveState(checkpoint)) return 'ended'
   if (slot?.native) {
     if (checkpoint?.state === 'failed') return 'failed'
     return 'unattended'
@@ -136,7 +149,7 @@ function lastEvidenceMs(slot, checkpoint) {
 function isOlderRecord({ slot, checkpoint, presence }, nowMs) {
   if (['open', 'tracked'].includes(presence?.catalog) || presence?.execution === 'active') return false
   if (slot?.workflow && slot.workflow_status === 'running') return false
-  if (needsAttention(checkpoint, slot) || checkpoint?.attention?.status === 'claimed' || checkpoint?.state === 'awaiting_attention') return false
+  if (needsAttention(checkpoint, slot) || checkpoint?.attention?.status === 'claimed') return false
   const evidenceMs = lastEvidenceMs(slot, checkpoint)
   return evidenceMs > 0 && nowMs - evidenceMs > OLDER_AFTER_MS
 }
@@ -303,6 +316,7 @@ function liveFact(slot, checkpoint, presence = null) {
     return 'The workflow has finished.'
   }
   if (slot?.pending_approval) return 'A tool approval is waiting in this conversation.'
+  if (displayState(checkpoint, slot, presence) === 'ended') return 'No live session backs this record; it has ended.'
   if (slot?.waiting_for_input) return 'The turn has ended; the session is idle.'
   if (checkpoint?.state === 'failed') return 'The session has reported a failure.'
   if (slot?.native) {
@@ -951,7 +965,7 @@ function Multiplex() {
           peerDeliveryText(slot) && h('span', { style: styles.footerItem }, peerDeliveryText(slot)),
           !(runtime?.agents_active && card.liveStatus === 'The session is active.') && h('span', { style: styles.footerItem }, card.liveStatus),
           h('span', { style: styles.footerItem }, sessionLocation(presence)),
-          h('span', { style: styles.footerItem }, footerTimestamp(slot, checkpoint)),
+          h('span', { style: styles.footerItem }, footerTimestamp(slot, checkpoint, card.state === 'ended')),
         ),
       )
     })),
